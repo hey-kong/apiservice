@@ -1,14 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
-	"dispatcher/utils"
 	"flag"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
+
+	"dispatcher/utils"
 
 	"github.com/boltdb/bolt"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,6 +35,15 @@ var cur = 0
 var mu sync.Mutex
 
 func main() {
+	connectK8s()
+	loadDB()
+
+	http.HandleFunc("/query", getNodeName)
+	http.HandleFunc("/gettoken", getToken)
+	http.ListenAndServe(":6442", nil)
+}
+
+func connectK8s() {
 	var err error
 	var config *rest.Config
 	var kubeconfig *string
@@ -52,12 +64,6 @@ func main() {
 	if err != nil {
 		panic(err.Error())
 	}
-
-	loadDB()
-	getEdgeNames()
-
-	http.HandleFunc("/query", getNodeName)
-	http.ListenAndServe(":6442", nil)
 }
 
 func homeDir() string {
@@ -109,6 +115,9 @@ func getEdgeNames() {
 }
 
 func getNodeName(w http.ResponseWriter, r *http.Request) {
+	// refresh the node list with each request
+	getEdgeNames()
+
 	// get device id
 	q := r.URL.Query()
 	id := q.Get("id")
@@ -157,6 +166,22 @@ func getNodeName(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// return node name
-	log.Println("ok")
+	log.Println("get node name ok")
 	w.Write([]byte(nodeName))
+}
+
+func execShell(s string) (string, error) {
+	var out bytes.Buffer
+	cmd := exec.Command("/bin/bash", "-c", s)
+	cmd.Stdout = &out
+	err := cmd.Run()
+	return out.String(), err
+}
+
+func getToken(w http.ResponseWriter, r *http.Request) {
+	out, _ := execShell("keadm gettoken")
+
+	// return node name
+	log.Println("get token ok")
+	w.Write([]byte(out))
 }
